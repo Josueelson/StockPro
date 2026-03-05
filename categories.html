@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Catégories</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <div id="modal" class="modal-overlay hidden"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    Layout.init().then(() => load());
+    let categories = [], products = [], editingId = null;
+
+    async function load() {
+      [categories, products] = await Promise.all([Data.getCategories(), Data.getProducts()]);
+      render();
+    }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const f = categories.filter(c => c.name.toLowerCase().includes(s));
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Catégories de Produits</h1><p class="text-gray-500 text-sm">Organisez vos produits par catégorie</p></div>
+          <button onclick="openModal()" class="btn-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-semibold text-sm"><i data-lucide="plus" class="w-4 h-4"></i>Nouvelle Catégorie</button>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4">
+          <div class="relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" oninput="render()" value="${s}" placeholder="Rechercher..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          ${f.map(cat => {
+        const prodCount = products.filter(p => p.category_id === cat.id).length;
+        return `<div class="bg-white rounded-xl shadow-sm p-5">
+              <div class="flex items-start justify-between mb-3">
+                <div class="p-2.5 bg-purple-100 rounded-lg"><i data-lucide="tag" class="w-5 h-5 text-purple-600"></i></div>
+                <div class="flex gap-1">
+                  <button onclick="editCat('${cat.id}')" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                  <button onclick="delCat('${cat.id}','${cat.name.replace(/'/g, "\\'")}')}" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                </div>
+              </div>
+              <h3 class="text-lg font-bold text-gray-800">${cat.name}</h3>
+              <p class="text-sm text-gray-500 mb-3 min-h-[1.2rem]">${cat.description || ' '}</p>
+              <div class="flex items-center gap-2 pt-3 border-t">
+                <i data-lucide="package" class="w-4 h-4 text-gray-400"></i>
+                <span class="text-sm text-gray-600">${prodCount} produit${prodCount !== 1 ? 's' : ''}</span>
+              </div>
+            </div>`;
+      }).join('')}
+          ${f.length === 0 ? '<div class="col-span-3 text-center py-14 text-gray-500"><i data-lucide="tag" class="w-10 h-10 mx-auto mb-3 text-gray-300"></i><p>Aucune catégorie</p></div>' : ''}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function openModal(cat) {
+      editingId = cat ? cat.id : null;
+      document.getElementById('modal').innerHTML = `<div class="modal-content">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="text-xl font-bold">${cat ? 'Modifier' : 'Nouvelle'} Catégorie</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <form id="cf" class="p-5 space-y-4">
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Nom *</label><input type="text" id="fn" required value="${cat?.name || ''}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea id="fd" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">${cat?.description || ''}</textarea></div>
+          <div class="flex gap-3"><button type="button" onclick="closeModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm">Annuler</button><button type="submit" class="flex-1 btn-primary text-white py-2.5 rounded-lg font-medium text-sm">${cat ? 'Enregistrer' : 'Créer'}</button></div>
+        </form></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+      document.getElementById('cf').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="animate-spin mr-2" data-lucide="loader-2"></i> Traitement...`;
+        lucide.createIcons();
+
+        const u = Auth.getUser();
+        const d = { name: document.getElementById('fn').value, description: document.getElementById('fd').value, createdBy: u.id };
+        try {
+          if (editingId) {
+            await Data.updateCategory(editingId, d);
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Modification catégorie', module: 'Catégories', details: d.name });
+            alert('Catégorie mise à jour avec succès !');
+          } else {
+            await Data.addCategory(d);
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Ajout catégorie', module: 'Catégories', details: d.name });
+            alert('Catégorie créée avec succès !');
+          }
+          closeModal(); await load();
+        } catch (err) {
+          alert('Erreur: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          lucide.createIcons();
+        }
+      };
+    }
+    function editCat(id) { openModal(categories.find(c => c.id === id)); }
+    async function delCat(id, name) {
+      if (!confirm(`Supprimer "${name}" ? Les produits associés seront sans catégorie.`)) return;
+      const u = Auth.getUser();
+      try {
+        await Data.deleteCategory(id);
+        await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Suppression catégorie', module: 'Catégories', details: name });
+        await load();
+      } catch (err) { alert('Impossible de supprimer cette catégorie.'); }
+    }
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); editingId = null; }
+  </script>
+</body>
+
+</html>

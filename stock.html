@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Stock</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <div id="modal" class="modal-overlay hidden"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    Layout.init().then(() => load());
+    let entries = [], products = [], suppliers = [], currentPage = 1;
+    const PER_PAGE = 50;
+
+    async function load() {
+      [entries, products, suppliers] = await Promise.all([Data.getStockEntries(), Data.getProducts(), Data.getSuppliers()]);
+      currentPage = 1; render();
+    }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const fd = document.getElementById('fd')?.value || '';
+      const td = document.getElementById('td')?.value || '';
+      let f = entries.filter(e => e.product_name.toLowerCase().includes(s) || (e.supplier || '').toLowerCase().includes(s));
+      if (fd || td) f = Data.filterByPeriod(f, 'entry_date', fd, td);
+      const today = new Date().toISOString().split('T')[0];
+      const todayEntries = entries.filter(e => e.entry_date === today).length;
+      const totalValue = entries.reduce((s, e) => s + Number(e.total_value), 0);
+      const paged = Data.paginate(f, currentPage, PER_PAGE);
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Entrées de Stock</h1><p class="text-gray-500 text-sm">Enregistrez les nouvelles entrées de produits</p></div>
+          <button onclick="openModal()" class="btn-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-semibold text-sm"><i data-lucide="plus" class="w-4 h-4"></i>Nouvelle Entrée</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-blue-100 rounded-lg"><i data-lucide="package" class="w-5 h-5 text-blue-600"></i></div><div><p class="text-xs text-gray-500">Total Entrées</p><p class="text-xl font-bold">${entries.length}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-green-100 rounded-lg"><i data-lucide="trending-up" class="w-5 h-5 text-green-600"></i></div><div><p class="text-xs text-gray-500">Entrées Aujourd'hui</p><p class="text-xl font-bold">${todayEntries}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-amber-100 rounded-lg"><i data-lucide="dollar-sign" class="w-5 h-5 text-amber-600"></i></div><div><p class="text-xs text-gray-500">Valeur Totale</p><p class="text-xl font-bold">${totalValue.toLocaleString()} FC</p></div></div></div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4">
+          <div class="flex flex-col md:flex-row gap-3">
+            <div class="flex-1 relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" value="${s}" oninput="render()" placeholder="Rechercher..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <div class="date-filter">
+              <input type="date" id="fd" value="${fd}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+              <span class="text-gray-400">→</span>
+              <input type="date" id="td" value="${td}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+            </div>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Date</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Produit</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Quantité</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Prix/Carton</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Valeur</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Fournisseur</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">
+            ${paged.data.map(e => `<tr class="table-row">
+              <td class="px-5 py-3 text-gray-500">${new Date(e.entry_date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+              <td class="px-5 py-3 font-medium text-gray-800">${e.product_name}</td>
+              <td class="px-5 py-3 text-gray-600">${e.quantity} cartons</td>
+              <td class="px-5 py-3 text-gray-600">${Number(e.price_per_carton).toLocaleString()} FC</td>
+              <td class="px-5 py-3 font-medium text-green-600">${Number(e.total_value).toLocaleString()} FC</td>
+              <td class="px-5 py-3 text-gray-500">${e.supplier || (e.suppliers?.name) || '-'}</td>
+            </tr>`).join('')}
+            ${paged.data.length === 0 ? '<tr><td colspan="6" class="px-5 py-10 text-center text-gray-500">Aucune entrée trouvée</td></tr>' : ''}
+          </tbody></table></div>
+          ${Data.renderPagination(paged.total, paged.page, paged.perPage, 'goPage')}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function goPage(p) { currentPage = p; render(); }
+
+    function openModal() {
+      const today = new Date().toISOString().split('T')[0];
+      document.getElementById('modal').innerHTML = `<div class="modal-content">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="text-xl font-bold">Nouvelle Entrée de Stock</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <form id="sf" class="p-5 space-y-4">
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Produit *</label><select id="fp" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" onchange="onProdChange()"><option value="">Sélectionner</option>${products.map(p => `<option value="${p.id}" data-price="${p.price_per_carton}">${p.name} (Stock: ${p.stock_level})</option>`).join('')}</select></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Fournisseur</label><select id="fsup" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Aucun</option>${suppliers.filter(s => s.is_active).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Date *</label><input type="date" id="fdate" required value="${today}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Quantité (cartons) *</label><input type="number" id="fqty" required min="1" value="1" oninput="updateTotal()" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Prix/Carton (FC) *</label><input type="number" id="fprice" required min="0" value="0" oninput="updateTotal()" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          </div>
+          <div class="p-3 bg-gray-50 rounded-lg"><p class="text-xs text-gray-600">Valeur totale de l'entrée</p><p class="text-xl font-bold text-gray-800" id="ftotal">0 FC</p></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Notes</label><textarea id="fnotes" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" rows="2" placeholder="Notes..."></textarea></div>
+          <div class="flex gap-3"><button type="button" onclick="closeModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm">Annuler</button><button type="submit" class="flex-1 btn-primary text-white py-2.5 rounded-lg font-medium text-sm">Enregistrer</button></div>
+        </form></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+      document.getElementById('sf').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="animate-spin mr-2" data-lucide="loader-2"></i> Traitement...`;
+        lucide.createIcons();
+
+        const prodId = document.getElementById('fp').value;
+        const product = products.find(p => p.id === prodId);
+        if (!product) return;
+        const qty = Number(document.getElementById('fqty').value);
+        const price = Number(document.getElementById('fprice').value);
+        const supId = document.getElementById('fsup').value || null;
+        const sup = suppliers.find(s => s.id === supId);
+
+        try {
+          const u = Auth.getUser();
+          await Data.addStockEntry({ productId: prodId, productName: product.name, quantity: qty, pricePerCarton: price, totalValue: qty * price, entryDate: document.getElementById('fdate').value, supplierId: supId, supplier: sup?.name || '', notes: document.getElementById('fnotes').value, createdBy: u.id });
+          await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Entrée de stock', module: 'Stock', details: `${qty} cartons de ${product.name}${sup ? ' — ' + sup.name : ''}` });
+          alert('Entrée de stock enregistrée avec succès !');
+          closeModal(); await load();
+        } catch (err) {
+          alert('Erreur: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          lucide.createIcons();
+        }
+      };
+    }
+
+    function onProdChange() {
+      const sel = document.getElementById('fp');
+      document.getElementById('fprice').value = sel.options[sel.selectedIndex]?.dataset?.price || 0;
+      updateTotal();
+    }
+    function updateTotal() {
+      const q = Number(document.getElementById('fqty')?.value || 0);
+      const p = Number(document.getElementById('fprice')?.value || 0);
+      const el = document.getElementById('ftotal');
+      if (el) el.textContent = (q * p).toLocaleString() + ' FC';
+    }
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+  </script>
+</body>
+
+</html>

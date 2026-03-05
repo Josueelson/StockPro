@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Activités</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <div id="modal" class="modal-overlay hidden"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    Layout.init().then(() => load());
+    let activities = [], editingId = null, currentPage = 1, fd = '', td = '';
+    const PER_PAGE = 50;
+
+    async function load() { activities = await Data.getActivities(); currentPage = 1; render(); }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const st = document.getElementById('st')?.value || '';
+      fd = document.getElementById('fd')?.value || '';
+      td = document.getElementById('td')?.value || '';
+
+      let f = activities.filter(a => {
+        const ms = a.title.toLowerCase().includes(s) || (a.description || '').toLowerCase().includes(s);
+        const mf = !st || a.status === st;
+        return ms && mf;
+      });
+      if (fd || td) f = Data.filterByPeriod(f, 'date', fd, td);
+
+      const totalCost = f.reduce((s, a) => s + Number(a.cost || 0), 0);
+      const paged = Data.paginate(f, currentPage, PER_PAGE);
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Activités & Logistique</h1><p class="text-gray-500 text-sm">Suivez les opérations exceptionnelles et leurs coûts</p></div>
+          <button onclick="openModal()" class="btn-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-semibold text-sm"><i data-lucide="plus" class="w-4 h-4"></i>Nouvelle Activité</button>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-purple-100 rounded-lg"><i data-lucide="clipboard-list" class="w-5 h-5 text-purple-600"></i></div><div><p class="text-xs text-gray-500">Toutes les activités</p><p class="text-2xl font-bold">${activities.length}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-amber-100 rounded-lg"><i data-lucide="clock" class="w-5 h-5 text-amber-600"></i></div><div><p class="text-xs text-gray-500">En Cours</p><p class="text-2xl font-bold text-amber-600">${activities.filter(a => a.status === 'pending').length}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-orange-100 rounded-lg"><i data-lucide="dollar-sign" class="w-5 h-5 text-orange-600"></i></div><div><p class="text-xs text-gray-500">Coût Total (Filtré)</p><p class="text-2xl font-bold text-orange-600">${totalCost.toLocaleString()} FC</p></div></div></div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4">
+          <div class="flex flex-col md:flex-row gap-3">
+            <div class="flex-1 relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" oninput="render()" value="${s}" placeholder="Rechercher..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <select id="st" onchange="render()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Tous les statuts</option><option value="pending" ${st === 'pending' ? 'selected' : ''}>En cours</option><option value="completed" ${st === 'completed' ? 'selected' : ''}>Terminée</option><option value="cancelled" ${st === 'cancelled' ? 'selected' : ''}>Annulée</option></select>
+            <div class="date-filter">
+              <input type="date" id="fd" value="${fd}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+              <span class="text-gray-400">→</span>
+              <input type="date" id="td" value="${td}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+            </div>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Activité</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Coût</th>
+            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-600 uppercase">Statut</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Actions</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">
+            ${paged.data.map(a => `<tr class="table-row">
+              <td class="px-5 py-4 text-gray-500 whitespace-nowrap">${new Date(a.date).toLocaleDateString('fr-FR')}</td>
+              <td class="px-5 py-4"><div><p class="font-medium text-gray-800">${a.title}</p><p class="text-xs text-gray-400">${a.description || ''}</p></div></td>
+              <td class="px-5 py-4 font-bold text-orange-600">${Number(a.cost || 0).toLocaleString()} FC</td>
+              <td class="px-5 py-4 text-center"><span class="badge ${a.status === 'completed' ? 'badge-success' : a.status === 'pending' ? 'badge-warning' : 'badge-danger'}">${a.status === 'completed' ? 'Terminée' : a.status === 'pending' ? 'En cours' : 'Annulée'}</span></td>
+              <td class="px-5 py-4"><div class="flex items-center gap-1">
+                <button onclick="editA('${a.id}')" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                <button onclick="delA('${a.id}','${a.title.replace(/'/g, "\\'")}')}" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div></td>
+            </tr>`).join('')}
+            ${paged.data.length === 0 ? '<tr><td colspan="5" class="px-5 py-12 text-center text-gray-500">Aucune activité trouvée</td></tr>' : ''}
+          </tbody></table></div>
+          ${Data.renderPagination(paged.total, paged.page, paged.perPage, 'goPage')}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function goPage(p) { currentPage = p; render(); }
+
+    function openModal(a) {
+      editingId = a ? a.id : null;
+      document.getElementById('modal').innerHTML = `<div class="modal-content">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="text-xl font-bold">${a ? 'Modifier' : 'Nouvelle'} Activité</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <form id="af" class="p-5 space-y-4">
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Date *</label><input type="date" id="fd" required value="${a?.date || new Date().toISOString().split('T')[0]}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Titre de l'activité *</label><input type="text" id="ft" required value="${a?.title || ''}" placeholder="Ex: Déchargement Container" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Description</label><textarea id="fdesc" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">${a?.description || ''}</textarea></div>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Coût Estimé (FC)</label><input type="number" id="fc" min="0" value="${a?.cost || 0}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Statut</label>
+              <select id="fst" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                <option value="pending" ${a?.status === 'pending' ? 'selected' : ''}>En cours</option>
+                <option value="completed" ${a?.status === 'completed' ? 'selected' : ''}>Terminée</option>
+                <option value="cancelled" ${a?.status === 'cancelled' ? 'selected' : ''}>Annulée</option>
+              </select>
+            </div>
+          </div>
+          <p class="text-xs text-amber-600 bg-amber-50 p-2 rounded flex items-center gap-2">
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+            Toute modification du coût sera automatiquement mise à jour dans la caisse.
+          </p>
+          <div class="flex gap-3 pt-2"><button type="button" onclick="closeModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm">Annuler</button><button type="submit" class="flex-1 btn-primary text-white py-2.5 rounded-lg font-medium text-sm">${a ? 'Enregistrer' : 'Créer'}</button></div>
+        </form></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+      document.getElementById('af').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="animate-spin mr-2" data-lucide="loader-2"></i> Traitement...`;
+        lucide.createIcons();
+
+        const u = Auth.getUser();
+        const d = { date: document.getElementById('fd').value, title: document.getElementById('ft').value, description: document.getElementById('fdesc').value, cost: Number(document.getElementById('fc').value), status: document.getElementById('fst').value, createdBy: u.id };
+        try {
+          if (editingId) {
+            await Data.updateActivity(editingId, d);
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Modification activité', module: 'Activités', details: d.title });
+            alert('Activité mise à jour avec succès !');
+          } else {
+            await Data.addActivity(d);
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Ajout activité', module: 'Activités', details: d.title });
+            alert('Activité créée avec succès !');
+          }
+          closeModal(); await load();
+        } catch (err) {
+          alert('Erreur: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          lucide.createIcons();
+        }
+      };
+    }
+    function editA(id) { openModal(activities.find(a => a.id === id)); }
+    async function delA(id, title) {
+      if (!confirm(`Supprimer "${title}" ? Les transactions liées en caisse resteront.`)) return;
+      const u = Auth.getUser();
+      await Data.deleteActivity(id);
+      await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Suppression activité', module: 'Activités', details: title });
+      await load();
+    }
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); editingId = null; }
+  </script>
+</body>
+
+</html>

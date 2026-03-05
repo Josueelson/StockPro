@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Tableau de bord</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw new Error('Not authenticated');
+    Layout.init().then(() => loadDashboard());
+
+    async function loadDashboard() {
+      const [products, clients, invoices, cashTransactions, personnel] = await Promise.all([
+        Data.getProducts(), Data.getClients(), Data.getInvoices(),
+        Data.getCashTransactions(), Data.getPersonnel()
+      ]);
+
+      const totalProducts = products.length;
+      const lowStockProducts = products.filter(p => p.stock_level <= p.min_stock_level).length;
+      const totalClients = clients.length;
+      const totalInvoices = invoices.length;
+      const pendingInvoices = invoices.filter(i => i.status === 'pending' || i.status === 'partially_paid').length;
+      const totalPersonnel = personnel.filter(p => p.is_active).length;
+
+      // BUG FIX P2.2: Exclure les factures annulées du CA
+      const paidInvoices = invoices.filter(i => i.status === 'paid');
+      const totalRevenue = paidInvoices.reduce((s, i) => s + Number(i.total), 0);
+      const totalExpenses = cashTransactions.filter(t => ['expense', 'withdrawal', 'activity', 'return'].includes(t.type))
+        .reduce((s, t) => s + Number(t.amount), 0);
+      const cashBalance = cashTransactions.reduce((b, t) =>
+        Data.isIncome(t.type) ? b + Number(t.amount) : b - Number(t.amount), 0);
+
+      // Comparaison mois précédent
+      const now = new Date();
+      const thisMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonth = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+      const revThisMonth = paidInvoices.filter(i => i.created_at?.startsWith(thisMonth)).reduce((s, i) => s + Number(i.total), 0);
+      const revLastMonth = paidInvoices.filter(i => i.created_at?.startsWith(lastMonth)).reduce((s, i) => s + Number(i.total), 0);
+      const revDelta = revLastMonth > 0 ? ((revThisMonth - revLastMonth) / revLastMonth * 100).toFixed(1) : null;
+
+      // Top 5 produits vendus
+      const productSales = {};
+      invoices.filter(i => i.status !== 'cancelled').forEach(inv => {
+        (inv.items || []).forEach(item => {
+          productSales[item.product_name] = (productSales[item.product_name] || 0) + item.quantity;
+        });
+      });
+      const top5Products = Object.entries(productSales).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+      // Top 5 clients par CA
+      const clientSales = {};
+      paidInvoices.forEach(inv => {
+        clientSales[inv.client_name] = (clientSales[inv.client_name] || 0) + Number(inv.total);
+      });
+      const top5Clients = Object.entries(clientSales).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+      // Factures impayées > 30 jours
+      const overdueThreshold = new Date(); overdueThreshold.setDate(overdueThreshold.getDate() - 30);
+      const overdueInvoices = invoices.filter(i =>
+        ['pending', 'partially_paid'].includes(i.status) && new Date(i.created_at) < overdueThreshold
+      );
+
+      const statCards = [
+        { label: 'Produits', value: totalProducts, icon: 'package', color: 'bg-blue-500' },
+        { label: 'Stock Faible', value: lowStockProducts, icon: 'alert-triangle', color: 'bg-red-500', alert: lowStockProducts > 0 },
+        { label: 'Clients', value: totalClients, icon: 'users', color: 'bg-green-500' },
+        { label: 'Factures', value: totalInvoices, icon: 'file-text', color: 'bg-purple-500', subtext: `${pendingInvoices} en attente` },
+        {
+          label: 'CA Encaissé', value: `${totalRevenue.toLocaleString()} FC`, icon: 'trending-up', color: 'bg-emerald-500',
+          subtext: revDelta !== null ? `<span class="flex items-center gap-0.5">${revDelta > 0 ? '<i data-lucide="trending-up" class="w-3 h-3"></i>' : '<i data-lucide="trending-down" class="w-3 h-3"></i>'} ${Math.abs(revDelta)}%</span> vs mois préc.` : null
+        },
+        { label: 'Dépenses', value: `${totalExpenses.toLocaleString()} FC`, icon: 'trending-down', color: 'bg-orange-500' },
+        { label: 'Solde Caisse', value: `${cashBalance.toLocaleString()} FC`, icon: 'dollar-sign', color: cashBalance < 0 ? 'bg-red-500' : 'bg-amber-500', alert: cashBalance < 0 },
+        { label: 'Personnel Actif', value: totalPersonnel, icon: 'user-cog', color: 'bg-indigo-500' },
+      ];
+
+      const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+      const recentInvoices = invoices.filter(i => new Date(i.created_at) > weekAgo).slice(0, 5);
+      const lowStockList = products.filter(p => p.stock_level <= p.min_stock_level).slice(0, 5);
+
+      const content = document.getElementById('page-content');
+      content.innerHTML = `
+        <div class="space-y-6">
+          <div class="bg-gradient-to-r from-[#1e3a5f] to-[#2d5a8a] rounded-2xl p-6 text-white">
+            <h1 class="text-2xl font-bold mb-1 flex items-center gap-2">Bienvenue sur StockPro <i data-lucide="sparkles" class="w-6 h-6 text-amber-300"></i></h1>
+            <p class="text-blue-100 text-sm">Gérez efficacement votre entrepôt et suivez vos performances en temps réel.</p>
+          </div>
+
+          ${overdueInvoices.length > 0 ? `
+          <div class="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+            <i data-lucide="alert-circle" class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5"></i>
+            <div>
+              <p class="font-semibold text-red-700">${overdueInvoices.length} facture(s) impayée(s) depuis plus de 30 jours</p>
+              <p class="text-sm text-red-600 mt-0.5">Montant total: ${overdueInvoices.reduce((s, i) => s + Number(i.total), 0).toLocaleString()} FC</p>
+              <a href="invoices.html" class="text-sm underline text-red-700 mt-1 inline-block">Voir les factures →</a>
+            </div>
+          </div>
+          ` : ''}
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            ${statCards.map(stat => `
+              <div class="bg-white rounded-xl shadow-sm p-5 card-stat">
+                <div class="flex items-start justify-between">
+                  <div class="flex-1 min-w-0">
+                    <p class="text-gray-500 text-xs">${stat.label}</p>
+                    <p class="text-xl font-bold mt-1 ${stat.alert ? 'text-red-600' : 'text-gray-800'} truncate">${stat.value}</p>
+                    ${stat.subtext ? `<p class="text-xs text-gray-400 mt-0.5">${stat.subtext}</p>` : ''}
+                  </div>
+                  <div class="${stat.color} p-2.5 rounded-lg ml-2">
+                    <i data-lucide="${stat.icon}" class="w-5 h-5 text-white"></i>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-base font-semibold text-gray-800 mb-4">Ventes des 7 derniers jours (factures payées)</h3>
+              <div style="height:256px"><canvas id="salesChart"></canvas></div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-base font-semibold text-gray-800 mb-4">Statut des Factures</h3>
+              <div style="height:180px"><canvas id="statusChart"></canvas></div>
+              <div id="status-legend" class="flex flex-wrap justify-center gap-3 mt-4"></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-semibold text-gray-800">Factures Récentes</h3>
+                <a href="invoices.html" class="text-xs text-[#1e3a5f] hover:underline">Voir tout</a>
+              </div>
+              <div class="space-y-2">
+                ${recentInvoices.length > 0 ? recentInvoices.map(inv => `
+                  <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div>
+                      <p class="font-medium text-gray-800 text-sm">${inv.invoice_number}</p>
+                      <p class="text-xs text-gray-500">${inv.client_name}</p>
+                    </div>
+                    <div class="text-right">
+                      <p class="font-semibold text-gray-800 text-sm">${Number(inv.total).toLocaleString()} FC</p>
+                      <span class="text-xs px-2 py-0.5 rounded-full ${inv.status === 'paid' ? 'bg-green-100 text-green-700' : inv.status === 'partially_paid' ? 'bg-blue-100 text-blue-700' : inv.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}">
+                        ${inv.status === 'paid' ? 'Payée' : inv.status === 'partially_paid' ? 'Partiel' : inv.status === 'pending' ? 'En attente' : 'Annulée'}
+                      </span>
+                    </div>
+                  </div>
+                `).join('') : '<p class="text-center text-gray-400 py-6 text-sm">Aucune facture récente</p>'}
+              </div>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-semibold text-gray-800">Alertes Stock Faible</h3>
+                <a href="products.html" class="text-xs text-[#1e3a5f] hover:underline">Voir tout</a>
+              </div>
+              <div class="space-y-2">
+                ${lowStockList.length > 0 ? lowStockList.map(p => `
+                  <div class="flex items-center justify-between p-3 bg-red-50 rounded-lg border border-red-100">
+                    <div class="flex items-center gap-2">
+                      <i data-lucide="alert-triangle" class="w-4 h-4 text-red-500 flex-shrink-0"></i>
+                      <div>
+                        <p class="font-medium text-gray-800 text-sm">${p.name}</p>
+                        <p class="text-xs text-gray-500">${p.category || 'Sans catégorie'}</p>
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <p class="font-semibold text-red-600 text-sm">${p.stock_level} cartons</p>
+                      <p class="text-xs text-gray-500">Min: ${p.min_stock_level}</p>
+                    </div>
+                  </div>
+                `).join('') : `<div class="text-center py-6"><i data-lucide="check-circle" class="w-10 h-10 text-green-400 mx-auto mb-2"></i><p class="text-gray-500 text-sm">Tous les stocks sont à niveau</p></div>`}
+              </div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-base font-semibold text-gray-800 mb-4">🏆 Top 5 Produits Vendus</h3>
+              ${top5Products.length > 0 ? top5Products.map(([name, qty], i) => `
+                <div class="flex items-center gap-3 mb-3">
+                  <span class="text-lg font-bold text-gray-300 w-6">${i + 1}</span>
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-gray-800">${name}</p>
+                    <div class="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                      <div class="bg-[#1e3a5f] h-1.5 rounded-full" style="width:${Math.round(qty / top5Products[0][1] * 100)}%"></div>
+                    </div>
+                  </div>
+                  <span class="text-sm font-semibold text-gray-700">${qty} cartons</span>
+                </div>
+              `).join('') : '<p class="text-gray-400 text-sm text-center py-4">Aucune donnée</p>'}
+            </div>
+            <div class="bg-white rounded-xl shadow-sm p-6">
+              <h3 class="text-base font-semibold text-gray-800 mb-4 flex items-center gap-2"><i data-lucide="star" class="w-4 h-4 text-amber-500"></i> Top 5 Clients</h3>
+              ${top5Clients.length > 0 ? top5Clients.map(([name, ca], i) => `
+                <div class="flex items-center gap-3 mb-3">
+                  <span class="text-lg font-bold text-gray-300 w-6">${i + 1}</span>
+                  <div class="flex-1">
+                    <p class="text-sm font-medium text-gray-800">${name}</p>
+                    <div class="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                      <div class="bg-amber-500 h-1.5 rounded-full" style="width:${Math.round(ca / top5Clients[0][1] * 100)}%"></div>
+                    </div>
+                  </div>
+                  <span class="text-sm font-semibold text-gray-700">${Number(ca).toLocaleString()} FC</span>
+                </div>
+              `).join('') : '<p class="text-gray-400 text-sm text-center py-4">Aucune donnée</p>'}
+            </div>
+          </div>
+
+          ${Auth.isAdmin() ? `
+          <div class="bg-white rounded-xl shadow-sm p-6">
+            <h3 class="text-base font-semibold text-gray-800 mb-4">Actions Rapides (Admin)</h3>
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+              ${[['users.html', 'users', 'Utilisateurs'], ['suppliers.html', 'truck', 'Fournisseurs'], ['categories.html', 'tag', 'Catégories'], ['reports.html', 'bar-chart-2', 'Rapports'], ['logs.html', 'settings', 'Journaux']].map(([href, icon, label]) => `
+                <a href="${href}" class="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors text-center">
+                  <i data-lucide="${icon}" class="w-7 h-7 text-[#1e3a5f] mx-auto mb-1.5"></i>
+                  <span class="text-xs font-medium text-gray-700">${label}</span>
+                </a>
+              `).join('')}
+            </div>
+          </div>
+          ` : ''}
+        </div>`;
+
+      lucide.createIcons();
+
+      // Chart: ventes 7 jours (BUG FIX P2.2: only 'paid' invoices)
+      const days = [], salesData = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const ds = d.toISOString().split('T')[0];
+        days.push(d.toLocaleDateString('fr-FR', { weekday: 'short' }));
+        salesData.push(paidInvoices.filter(inv => inv.created_at?.startsWith(ds))
+          .reduce((s, inv) => s + Number(inv.total), 0));
+      }
+      new Chart(document.getElementById('salesChart'), {
+        type: 'bar', data: { labels: days, datasets: [{ label: 'Ventes (FC)', data: salesData, backgroundColor: '#1e3a5f', borderRadius: 6 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+      });
+
+      // Chart: statut factures
+      const statusMap = { paid: ['Payées', '#10b981'], partially_paid: ['Partiel', '#3b82f6'], pending: ['En attente', '#f59e0b'], cancelled: ['Annulées', '#ef4444'] };
+      const statusData = [], statusLabels = [], statusColors = [];
+      Object.entries(statusMap).forEach(([k, [label, color]]) => {
+        const c = invoices.filter(i => i.status === k).length;
+        if (c > 0) { statusData.push(c); statusLabels.push(label); statusColors.push(color); }
+      });
+      if (statusData.length > 0) {
+        new Chart(document.getElementById('statusChart'), {
+          type: 'doughnut', data: { labels: statusLabels, datasets: [{ data: statusData, backgroundColor: statusColors }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, cutout: '65%' }
+        });
+        document.getElementById('status-legend').innerHTML = statusLabels.map((l, i) =>
+          `<div class="flex items-center gap-1.5"><div class="w-2.5 h-2.5 rounded-full" style="background:${statusColors[i]}"></div><span class="text-xs text-gray-600">${l}</span></div>`).join('');
+      }
+    }
+  </script>
+</body>
+
+</html>

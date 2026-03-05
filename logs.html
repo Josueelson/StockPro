@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Logs Système</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    const u = Auth.getUser();
+    if (u.role !== 'admin' && u.role !== 'owner') { alert('Accès réservé aux administrateurs'); location.href = 'dashboard.html'; throw 0; }
+
+    Layout.init().then(() => load());
+    let logs = [], currentPage = 1, fd = '', td = '';
+    const PER_PAGE = 50;
+
+    async function load() { logs = await Data.getLogs(); currentPage = 1; render(); }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const mf = document.getElementById('mf')?.value || '';
+      fd = document.getElementById('fd')?.value || '';
+      td = document.getElementById('td')?.value || '';
+
+      let f = logs.filter(l => {
+        const ms = l.user_name.toLowerCase().includes(s) || (l.details || '').toLowerCase().includes(s) || (l.action || '').toLowerCase().includes(s);
+        const mm = !mf || l.module === mf;
+        return ms && mm;
+      });
+      if (fd || td) f = Data.filterByPeriod(f, 'created_at', fd, td);
+
+      const paged = Data.paginate(f, currentPage, PER_PAGE);
+      const modules = [...new Set(logs.map(l => l.module))];
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Journal d'Audit</h1><p class="text-gray-500 text-sm">Historique complet des actions effectuées sur le système</p></div>
+          <button onclick="exportCSV()" class="flex items-center gap-2 px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 text-sm font-medium"><i data-lucide="download" class="w-4 h-4"></i>Exporter</button>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4">
+          <div class="flex flex-col md:flex-row gap-3">
+            <div class="flex-1 relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" oninput="render()" value="${s}" placeholder="Rechercher utilisateur, action ou détail..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <select id="mf" onchange="render()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Tous les modules</option>${modules.map(m => `<option value="${m}" ${mf === m ? 'selected' : ''}>${m}</option>`).join('')}</select>
+            <div class="date-filter">
+              <input type="date" id="fd" value="${fd}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+              <span class="text-gray-400">→</span>
+              <input type="date" id="td" value="${td}" onchange="render()" class="text-sm border border-gray-300 rounded-lg px-3 py-2">
+            </div>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Date & Heure</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Utilisateur</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Action</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Module</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600 uppercase">Détails</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">
+            ${paged.data.map(l => `<tr class="hover:bg-gray-50">
+              <td class="px-5 py-3 text-gray-500 text-xs whitespace-nowrap">${new Date(l.created_at).toLocaleString('fr-FR')}</td>
+              <td class="px-5 py-4"><div class="flex items-center gap-2"><div class="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500">${l.user_name.charAt(0)}</div><span class="font-medium text-gray-900">${l.user_name}</span></div></td>
+              <td class="px-5 py-4 text-gray-700">${l.action}</td>
+              <td class="px-5 py-4"><span class="badge badge-gray text-[10px]">${l.module}</span></td>
+              <td class="px-5 py-4 text-gray-500 text-xs italic">${l.details || '-'}</td>
+            </tr>`).join('')}
+            ${paged.data.length === 0 ? '<tr><td colspan="5" class="px-5 py-12 text-center text-gray-500">Aucun log trouvé</td></tr>' : ''}
+          </tbody></table></div>
+          ${Data.renderPagination(paged.total, paged.page, paged.perPage, 'goPage')}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function goPage(p) { currentPage = p; render(); }
+
+    function exportCSV() {
+      const csv = ['Date,Utilisateur,Action,Module,Details', ...logs.map(l => `"${new Date(l.created_at).toLocaleString('fr-FR')}","${l.user_name}","${l.action}","${l.module}","${l.details}"`)].join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = `logs_audit_${new Date().toISOString().split('T')[0]}.csv`; link.click();
+    }
+  </script>
+</body>
+
+</html>

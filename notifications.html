@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StockPro - Notifications</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="js/supabase.min.js"></script>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+    <script src="js/supabase-config.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/layout.js"></script>
+    <script>
+        if (!Auth.requireAuth()) throw 0;
+        Layout.init().then(() => load());
+        let notifs = [], filter = 'all';
+
+        async function load() {
+            notifs = await Data.getNotifications();
+            render();
+        }
+
+        function render() {
+            const f = filter === 'unread' ? notifs.filter(n => !n.is_read) : notifs;
+            const unread = notifs.filter(n => !n.is_read).length;
+
+            const typeInfo = {
+                low_stock: { icon: 'alert-triangle', color: 'text-amber-500', bg: 'bg-amber-50', label: 'Stock Faible' },
+                overdue_invoice: { icon: 'clock', color: 'text-red-500', bg: 'bg-red-50', label: 'Facture Impayée' },
+                order_received: { icon: 'package-check', color: 'text-green-500', bg: 'bg-green-50', label: 'Commande Reçue' },
+                return_approved: { icon: 'rotate-ccw', color: 'text-blue-500', bg: 'bg-blue-50', label: 'Avoir Approuvé' },
+                system: { icon: 'info', color: 'text-gray-500', bg: 'bg-gray-50', label: 'Système' }
+            };
+
+            document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Notifications</h1><p class="text-gray-500 text-sm">${unread} notification(s) non lue(s)</p></div>
+          <div class="flex gap-2">
+            ${unread > 0 ? `<button onclick="readAll()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm flex items-center gap-2"><i data-lucide="check-check" class="w-4 h-4"></i>Tout marquer lu</button>` : ''}
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-1 flex gap-1">
+          <button onclick="setFilter('all')" class="px-4 py-2 rounded-lg text-sm ${filter === 'all' ? 'bg-amber-500 text-white' : 'text-gray-600 hover:bg-gray-100'}">Toutes (${notifs.length})</button>
+          <button onclick="setFilter('unread')" class="px-4 py-2 rounded-lg text-sm ${filter === 'unread' ? 'bg-amber-500 text-white' : 'text-gray-600 hover:bg-gray-100'}">Non lues (${unread})</button>
+        </div>
+        <div class="space-y-3">
+          ${f.length === 0 ? `<div class="text-center py-16"><div class="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="check-circle" class="w-8 h-8 text-green-500"></i></div><p class="text-gray-500 font-medium">Tout est en ordre !</p><p class="text-gray-400 text-sm mt-1">Aucune notification</p></div>` : ''}
+          ${f.map(n => {
+                const ti = typeInfo[n.type] || typeInfo.system;
+                return `<div class="bg-white rounded-xl shadow-sm p-4 flex items-start gap-4 ${!n.is_read ? 'border-l-4 border-amber-500' : ''}">
+              <div class="${ti.bg} p-2.5 rounded-lg flex-shrink-0"><i data-lucide="${ti.icon}" class="w-5 h-5 ${ti.color}"></i></div>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <p class="font-semibold text-gray-800 ${!n.is_read ? '' : 'opacity-80'}">${n.title}</p>
+                    <p class="text-sm text-gray-500 mt-0.5">${n.message}</p>
+                    <p class="text-xs text-gray-400 mt-1.5">${new Date(n.created_at).toLocaleString('fr-FR')}</p>
+                  </div>
+                  <div class="flex gap-1 flex-shrink-0">
+                    <span class="badge badge-gray text-[10px]">${ti.label}</span>
+                    ${!n.is_read ? `<button onclick="readNotif('${n.id}')" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-600" title="Marquer comme lue"><i data-lucide="check" class="w-4 h-4"></i></button>` : ''}
+                  </div>
+                </div>
+              </div>
+            </div>`;
+            }).join('')}
+        </div></div>`;
+            lucide.createIcons();
+        }
+
+        function setFilter(f) { filter = f; render(); }
+
+        async function readNotif(id) {
+            await Data.markNotificationRead(id);
+            const n = notifs.find(n => n.id === id);
+            if (n) n.is_read = true;
+            render();
+        }
+        async function readAll() {
+            await Data.markAllNotificationsRead();
+            notifs.forEach(n => n.is_read = true);
+            render();
+        }
+    </script>
+</body>
+
+</html>

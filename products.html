@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Produits</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <div id="modal" class="modal-overlay hidden"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    Layout.init().then(() => load());
+    let products = [], categories = [], editingId = null, currentPage = 1;
+    const PER_PAGE = 50;
+
+    async function load() { [products, categories] = await Promise.all([Data.getProducts(), Data.getCategories()]); currentPage = 1; render(); }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const cf = document.getElementById('cf')?.value || '';
+      let f = products.filter(p => p.name.toLowerCase().includes(s) || (p.category || '').toLowerCase().includes(s));
+      if (cf) f = f.filter(p => p.category_id === cf || p.category === cf);
+      const low = products.filter(p => p.stock_level <= p.min_stock_level).length;
+      const totalValue = products.reduce((s, p) => s + Number(p.price_per_carton) * p.stock_level, 0);
+      const paged = Data.paginate(f, currentPage, PER_PAGE);
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Produits</h1><p class="text-gray-500 text-sm">Gérez votre catalogue de produits</p></div>
+          <button onclick="openModal()" class="btn-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-semibold text-sm"><i data-lucide="plus" class="w-4 h-4"></i>Nouveau Produit</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-blue-100 rounded-lg"><i data-lucide="package" class="w-5 h-5 text-blue-600"></i></div><div><p class="text-xs text-gray-500">Total</p><p class="text-2xl font-bold">${products.length}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-red-100 rounded-lg"><i data-lucide="alert-triangle" class="w-5 h-5 text-red-600"></i></div><div><p class="text-xs text-gray-500">Stock Faible</p><p class="text-2xl font-bold text-red-600">${low}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-purple-100 rounded-lg"><i data-lucide="tag" class="w-5 h-5 text-purple-600"></i></div><div><p class="text-xs text-gray-500">Catégories</p><p class="text-2xl font-bold">${categories.length}</p></div></div></div>
+          <div class="bg-white rounded-xl shadow-sm p-5"><div class="flex items-center gap-3"><div class="p-2 bg-green-100 rounded-lg"><i data-lucide="dollar-sign" class="w-5 h-5 text-green-600"></i></div><div><p class="text-xs text-gray-500">Valeur Stock</p><p class="text-xl font-bold text-green-600">${totalValue.toLocaleString()} FC</p></div></div></div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4">
+          <div class="flex flex-col md:flex-row gap-3">
+            <div class="flex-1 relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" value="${s}" oninput="render()" placeholder="Rechercher..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <select id="cf" onchange="render()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Toutes catégories</option>${categories.map(c => `<option value="${c.id}" ${cf === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}</select>
+          </div>
+        </div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Nom</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Catégorie</th>
+            <th class="px-5 py-3 text-right text-xs font-semibold text-gray-600">Stock</th>
+            <th class="px-5 py-3 text-right text-xs font-semibold text-gray-600">Stock Min</th>
+            <th class="px-5 py-3 text-right text-xs font-semibold text-gray-600">Prix/Carton</th>
+            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-600">Statut</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">
+            ${paged.data.map(p => `<tr class="table-row">
+              <td class="px-5 py-3"><div><p class="font-medium text-gray-800">${p.name}</p>${p.description ? `<p class="text-xs text-gray-400">${p.description}</p>` : ''}</div></td>
+              <td class="px-5 py-3"><span class="text-xs bg-purple-50 text-purple-700 px-2 py-0.5 rounded-full">${p.category || (p.categories?.name) || 'Sans catégorie'}</span></td>
+              <td class="px-5 py-3 text-right font-semibold ${p.stock_level === 0 ? 'text-red-600' : p.stock_level <= p.min_stock_level ? 'text-amber-600' : 'text-gray-800'}">${p.stock_level}</td>
+              <td class="px-5 py-3 text-right text-gray-500">${p.min_stock_level}</td>
+              <td class="px-5 py-3 text-right text-gray-700">${Number(p.price_per_carton).toLocaleString()} FC</td>
+              <td class="px-5 py-3 text-center"><span class="badge ${p.stock_level === 0 ? 'badge-danger' : p.stock_level <= p.min_stock_level ? 'badge-warning' : 'badge-success'}">${p.stock_level === 0 ? 'Rupture' : p.stock_level <= p.min_stock_level ? 'Faible' : 'OK'}</span></td>
+              <td class="px-5 py-3"><div class="flex items-center gap-1">
+                <button onclick="editP('${p.id}')" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600" title="Modifier"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                <button onclick="delP('${p.id}','${p.name.replace(/'/g, "\\'")}')}" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600" title="Supprimer"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div></td>
+            </tr>`).join('')}
+            ${paged.data.length === 0 ? '<tr><td colspan="7" class="px-5 py-10 text-center text-gray-500">Aucun produit</td></tr>' : ''}
+          </tbody></table></div>
+          ${Data.renderPagination(paged.total, paged.page, paged.perPage, 'goPage')}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function goPage(p) { currentPage = p; render(); }
+
+    function openModal(p) {
+      editingId = p ? p.id : null;
+      document.getElementById('modal').innerHTML = `<div class="modal-content">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="text-xl font-bold">${p ? 'Modifier' : 'Nouveau'} Produit</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <form id="pf" class="p-5 space-y-4">
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Nom *</label><input type="text" id="fn" required value="${p?.name || ''}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Description</label><input type="text" id="fd" value="${p?.description || ''}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Catégorie</label>
+            <select id="fc" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              <option value="">Sans catégorie</option>
+              ${categories.map(c => `<option value="${c.id}" ${p?.category_id === c.id ? 'selected' : ''}>${c.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Prix/Carton (FC) *</label><input type="number" id="fprice" required min="0" value="${p?.price_per_carton || 0}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Stock Initial</label><input type="number" id="fstock" min="0" value="${p?.stock_level || 0}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" ${p ? 'disabled' : ''}></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Stock Min</label><input type="number" id="fmin" min="0" value="${p?.min_stock_level || 10}" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          </div>
+          <div class="flex gap-3"><button type="button" onclick="closeModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm">Annuler</button><button type="submit" class="flex-1 btn-primary text-white py-2.5 rounded-lg font-medium text-sm">${p ? 'Enregistrer' : 'Créer'}</button></div>
+        </form></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+      document.getElementById('pf').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="animate-spin mr-2" data-lucide="loader-2"></i> Traitement...`;
+        lucide.createIcons();
+
+        const u = Auth.getUser();
+        const catId = document.getElementById('fc').value || null;
+        const cat = categories.find(c => c.id === catId);
+        const d = { name: document.getElementById('fn').value, description: document.getElementById('fd').value, category: cat?.name || '', categoryId: catId, pricePerCarton: Number(document.getElementById('fprice').value), minStockLevel: Number(document.getElementById('fmin').value) };
+
+        try {
+          if (editingId) {
+            await Data.updateProduct(editingId, d);
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Modification produit', module: 'Produits', details: `Modification: ${d.name}` });
+            alert('Produit mis à jour avec succès !');
+          } else {
+            await Data.addProduct({ ...d, stockLevel: Number(document.getElementById('fstock').value), createdBy: u.id });
+            await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Ajout produit', module: 'Produits', details: `Ajout: ${d.name}` });
+            alert('Produit créé avec succès !');
+          }
+          closeModal(); await load();
+        } catch (err) {
+          alert('Erreur: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          lucide.createIcons();
+        }
+      };
+    }
+
+    function editP(id) { openModal(products.find(p => p.id === id)); }
+
+    async function delP(id, name) {
+      if (!confirm(`Supprimer "${name}" ?`)) return;
+      const u = Auth.getUser();
+      try {
+        await Data.deleteProduct(id);
+        await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Suppression produit', module: 'Produits', details: `Suppression: ${name}` });
+        await load();
+      } catch (err) {
+        // BUG FIX P2.8: Afficher l'erreur FK proprement
+        alert(`Impossible de supprimer "${name}" car ce produit est utilisé dans des factures ou des entrées de stock. Désactivez-le plutôt.`);
+      }
+    }
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); editingId = null; }
+  </script>
+</body>
+
+</html>

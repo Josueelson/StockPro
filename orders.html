@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockPro - Commandes Fournisseurs</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="js/supabase.min.js"></script>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+  <div id="app" class="min-h-screen bg-gray-100 flex"></div>
+  <div id="modal" class="modal-overlay hidden"></div>
+  <script src="js/supabase-config.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    if (!Auth.requireAuth()) throw 0;
+    Layout.init().then(() => load());
+    let orders = [], suppliers = [], products = [], items = [], currentPage = 1;
+
+    async function load() {
+      [orders, suppliers, products] = await Promise.all([Data.getPurchaseOrders(), Data.getSuppliers(), Data.getProducts()]);
+      currentPage = 1; render();
+    }
+
+    function render() {
+      const s = document.getElementById('si')?.value?.toLowerCase() || '';
+      const sf = document.getElementById('sf')?.value || '';
+      let f = orders.filter(o => {
+        const ms = o.order_number.toLowerCase().includes(s) || o.supplier_name.toLowerCase().includes(s);
+        const mf = !sf || o.status === sf;
+        return ms && mf;
+      });
+      const st = {
+        pending: '<span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-3.5 h-3.5"></i> En attente</span>',
+        confirmed: '<span class="flex items-center gap-1.5"><i data-lucide="check-circle" class="w-3.5 h-3.5"></i> Confirmée</span>',
+        received: '<span class="flex items-center gap-1.5"><i data-lucide="package" class="w-3.5 h-3.5"></i> Reçue</span>',
+        cancelled: '<span class="flex items-center gap-1.5"><i data-lucide="x-circle" class="w-3.5 h-3.5"></i> Annulée</span>'
+      };
+      const paged = Data.paginate(f, currentPage, 50);
+
+      document.getElementById('page-content').innerHTML = `<div class="space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div><h1 class="text-2xl font-bold text-gray-800">Commandes Fournisseurs</h1><p class="text-gray-500 text-sm">Gérez vos bons de commandes et réceptions</p></div>
+          <button onclick="openCreate()" class="btn-primary text-white px-5 py-2.5 rounded-lg flex items-center gap-2 font-semibold text-sm"><i data-lucide="plus" class="w-4 h-4"></i>Nouvelle Commande</button>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          ${Object.entries(st).map(([k, l]) => { const count = orders.filter(o => o.status === k).length; return `<div class="bg-white rounded-xl shadow-sm p-4"><p class="text-xs text-gray-500">${l}</p><p class="text-2xl font-bold">${count}</p></div>`; }).join('')}
+        </div>
+        <div class="bg-white rounded-xl shadow-sm p-4"><div class="flex gap-3">
+          <div class="flex-1 relative"><i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"></i><input type="text" id="si" value="${s}" oninput="render()" placeholder="Rechercher..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          <select id="sf" onchange="render()" class="px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Tous</option><option value="pending">En attente</option><option value="confirmed">Confirmée</option><option value="received">Reçue</option><option value="cancelled">Annulée</option></select>
+        </div></div>
+        <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-gray-50"><tr>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">N° Commande</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Fournisseur</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Date</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Livraison Prévue</th>
+            <th class="px-5 py-3 text-right text-xs font-semibold text-gray-600">Total</th>
+            <th class="px-5 py-3 text-center text-xs font-semibold text-gray-600">Statut</th>
+            <th class="px-5 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
+          </tr></thead><tbody class="divide-y divide-gray-100">
+            ${paged.data.map(o => `<tr class="table-row">
+              <td class="px-5 py-3 font-medium text-gray-800">${o.order_number}</td>
+              <td class="px-5 py-3 text-gray-600">${o.supplier_name}</td>
+              <td class="px-5 py-3 text-gray-500">${new Date(o.created_at).toLocaleDateString('fr-FR')}</td>
+              <td class="px-5 py-3 text-gray-500">${o.expected_date ? new Date(o.expected_date).toLocaleDateString('fr-FR') : '-'}</td>
+              <td class="px-5 py-3 text-right font-semibold">${Number(o.total).toLocaleString()} FC</td>
+              <td class="px-5 py-3 text-center"><span class="badge ${o.status === 'received' ? 'badge-success' : o.status === 'confirmed' ? 'badge-info' : o.status === 'pending' ? 'badge-warning' : 'badge-danger'}">${o.status === 'pending' ? 'En attente' : o.status === 'confirmed' ? 'Confirmée' : o.status === 'received' ? 'Reçue' : 'Annulée'}</span></td>
+              <td class="px-5 py-3"><div class="flex gap-1">
+                <button onclick="viewOrder('${o.id}')" class="p-1.5 hover:bg-gray-100 rounded-lg text-gray-600" title="Voir"><i data-lucide="eye" class="w-4 h-4"></i></button>
+                ${o.status === 'pending' ? `<button onclick="confirmOrder('${o.id}')" class="p-1.5 hover:bg-blue-100 rounded-lg text-blue-600" title="Confirmer"><i data-lucide="check" class="w-4 h-4"></i></button>` : ''}
+                ${o.status === 'confirmed' ? `<button onclick="receiveOrder('${o.id}')" class="p-1.5 hover:bg-green-100 rounded-lg text-green-600" title="Réceptionner"><i data-lucide="package-check" class="w-4 h-4"></i></button>` : ''}
+                ${['pending', 'confirmed'].includes(o.status) ? `<button onclick="cancelOrder('${o.id}')" class="p-1.5 hover:bg-red-100 rounded-lg text-red-600" title="Annuler"><i data-lucide="x" class="w-4 h-4"></i></button>` : ''}
+              </div></td>
+            </tr>`).join('')}
+            ${paged.data.length === 0 ? '<tr><td colspan="7" class="px-5 py-12 text-center text-gray-500">Aucune commande</td></tr>' : ''}
+          </tbody></table></div>
+          ${Data.renderPagination(paged.total, paged.page, paged.perPage, 'goPage')}
+        </div></div>`;
+      lucide.createIcons();
+    }
+
+    function goPage(p) { currentPage = p; render(); }
+
+    function viewOrder(id) {
+      const o = orders.find(o => o.id === id); if (!o) return;
+      document.getElementById('modal').innerHTML = `<div class="modal-content modal-content-lg">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="font-bold text-xl">Commande ${o.order_number}</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <div class="p-5 space-y-4">
+          <div class="grid grid-cols-2 gap-5">
+            <div><p class="text-xs text-gray-500">Fournisseur</p><p class="font-semibold">${o.supplier_name}</p></div>
+            <div><p class="text-xs text-gray-500">Date</p><p class="font-semibold">${new Date(o.created_at).toLocaleDateString('fr-FR')}</p></div>
+          </div>
+          <div class="border rounded-lg overflow-hidden"><table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-4 py-2 text-left text-xs">Produit</th><th class="px-4 py-2 text-right text-xs">Qté</th><th class="px-4 py-2 text-right text-xs">Prix</th><th class="px-4 py-2 text-right text-xs">Total</th></tr></thead>
+            <tbody>${(o.items || []).map(it => `<tr class="border-t"><td class="px-4 py-2">${it.product_name}</td><td class="px-4 py-2 text-right">${it.quantity}</td><td class="px-4 py-2 text-right">${Number(it.price_per_carton).toLocaleString()} FC</td><td class="px-4 py-2 text-right font-medium">${Number(it.total).toLocaleString()} FC</td></tr>`).join('')}</tbody>
+          </table></div>
+          <div class="bg-gray-50 rounded-lg p-3 flex justify-between"><span class="font-medium">Total</span><span class="text-xl font-bold">${Number(o.total).toLocaleString()} FC</span></div>
+          ${o.notes ? `<p class="text-sm text-gray-500">Notes: ${o.notes}</p>` : ''}
+        </div></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+    }
+
+    function openCreate() {
+      items = [];
+      document.getElementById('modal').innerHTML = `<div class="modal-content modal-content-lg">
+        <div class="p-5 border-b flex items-center justify-between"><h2 class="text-xl font-bold">Nouvelle Commande</h2><button onclick="closeModal()" class="p-2 hover:bg-gray-100 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button></div>
+        <form id="of" class="p-5 space-y-5">
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Fournisseur *</label><select id="fsup" required class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Sélectionner</option>${suppliers.filter(s => s.is_active).map(s => `<option value="${s.id}">${s.name}</option>`).join('')}</select></div>
+            <div><label class="block text-sm font-medium text-gray-700 mb-1">Date de livraison prévue</label><input type="date" id="fdate" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></div>
+          </div>
+          <div class="border rounded-lg p-4"><h3 class="font-medium mb-3 text-sm">Produits à commander</h3>
+            <div class="flex gap-3 mb-3">
+              <select id="fp" class="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"><option value="">Sélectionner</option>${products.map(p => `<option value="${p.id}" data-name="${p.name}" data-price="${p.price_per_carton}">${p.name}</option>`).join('')}</select>
+              <input type="number" id="fq" min="1" value="1" class="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              <input type="number" id="fpr" min="0" value="0" placeholder="Prix" class="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm">
+              <button type="button" onclick="addItem()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"><i data-lucide="plus" class="w-4 h-4"></i></button>
+            </div>
+            <div id="oi"></div>
+          </div>
+          <div><label class="block text-sm font-medium text-gray-700 mb-1">Notes</label><textarea id="fnotes" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"></textarea></div>
+          <div class="flex gap-3"><button type="button" onclick="closeModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-lg font-medium text-sm">Annuler</button><button type="submit" id="sbtn" class="flex-1 btn-primary text-white py-2.5 rounded-lg font-medium text-sm disabled:opacity-50" disabled>Créer la Commande</button></div>
+        </form></div>`;
+      document.getElementById('modal').classList.remove('hidden'); lucide.createIcons();
+      document.getElementById('fp').addEventListener('change', () => {
+        const opt = document.getElementById('fp').options[document.getElementById('fp').selectedIndex];
+        document.getElementById('fpr').value = opt.dataset.price || 0;
+      });
+      document.getElementById('of').onsubmit = async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('sbtn');
+        const originalText = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<i class="animate-spin mr-2" data-lucide="loader-2"></i> Création...`;
+        lucide.createIcons();
+
+        const u = Auth.getUser();
+        const supId = document.getElementById('fsup').value;
+        const sup = suppliers.find(s => s.id === supId);
+        if (!sup || items.length === 0) return;
+
+        try {
+          await Data.addPurchaseOrder({ supplierId: supId, supplierName: sup.name, total: items.reduce((s, i) => s + i.total, 0), expectedDate: document.getElementById('fdate').value || null, notes: document.getElementById('fnotes').value, items: items.map(i => ({ productId: i.productId, productName: i.productName, quantity: i.quantity, pricePerCarton: i.pricePerCarton, total: i.total })), createdBy: u.id });
+          await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Commande créée', module: 'Commandes', details: `${sup.name} — ${items.length} article(s)` });
+          alert('Commande créée avec succès !');
+          closeModal(); await load();
+        } catch (err) {
+          alert('Erreur: ' + err.message);
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+          lucide.createIcons();
+        }
+      };
+    }
+
+    function addItem() {
+      const sel = document.getElementById('fp'); const opt = sel.options[sel.selectedIndex];
+      if (!opt.value) return;
+      const qty = Number(document.getElementById('fq').value) || 1;
+      const price = Number(document.getElementById('fpr').value) || 0;
+      const ex = items.findIndex(i => i.productId === opt.value);
+      if (ex >= 0) { items[ex].quantity += qty; items[ex].total = items[ex].quantity * items[ex].pricePerCarton; }
+      else items.push({ productId: opt.value, productName: opt.dataset.name, quantity: qty, pricePerCarton: price, total: qty * price });
+      renderItems();
+    }
+
+    function removeOItem(i) { items.splice(i, 1); renderItems(); }
+
+    function renderItems() {
+      const total = items.reduce((s, i) => s + i.total, 0);
+      document.getElementById('sbtn').disabled = items.length === 0;
+      document.getElementById('oi').innerHTML = items.length === 0 ? '' : `<div class="border rounded-lg overflow-hidden text-sm"><table class="w-full"><thead class="bg-gray-50"><tr><th class="px-3 py-2 text-left">Produit</th><th class="px-3 py-2 text-right">Qté</th><th class="px-3 py-2 text-right">Prix</th><th class="px-3 py-2 text-right">Total</th><th class="px-3 py-2"></th></tr></thead><tbody>${items.map((it, i) => `<tr class="border-t"><td class="px-3 py-2">${it.productName}</td><td class="px-3 py-2 text-right">${it.quantity}</td><td class="px-3 py-2 text-right">${it.pricePerCarton.toLocaleString()} FC</td><td class="px-3 py-2 text-right font-medium">${it.total.toLocaleString()} FC</td><td class="px-3 py-2"><button type="button" onclick="removeOItem(${i})" class="text-red-500"><i data-lucide="x" class="w-4 h-4"></i></button></td></tr>`).join('')}</tbody><tfoot class="bg-gray-50 font-bold"><tr><td colspan="3" class="px-3 py-2 text-right">Total:</td><td colspan="2" class="px-3 py-2 text-lg">${total.toLocaleString()} FC</td></tr></tfoot></table></div>`;
+      lucide.createIcons();
+    }
+
+    async function confirmOrder(id) {
+      const u = Auth.getUser();
+      await Data.updatePurchaseOrderStatus(id, 'confirmed');
+      await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Commande confirmée', module: 'Commandes', details: id });
+      await load();
+    }
+    async function receiveOrder(id) {
+      if (!confirm('Marquer comme reçue ? Cela génèrera des entrées de stock automatiquement.')) return;
+      const u = Auth.getUser();
+      await Data.receivePurchaseOrder(id, u.id);
+      await Data.addLog({ userId: u.id, userName: u.fullName, action: 'Commande réceptionnée', module: 'Commandes', details: id });
+      await load();
+    }
+    async function cancelOrder(id) {
+      if (!confirm('Annuler cette commande ?')) return;
+      const u = Auth.getUser();
+      await Data.updatePurchaseOrderStatus(id, 'cancelled');
+      await load();
+    }
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+  </script>
+</body>
+
+</html>
