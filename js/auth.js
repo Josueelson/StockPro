@@ -134,7 +134,7 @@ const Auth = {
 
     // Mise à jour du profil utilisateur
     async updateProfile(userId, updates) {
-        if (!supabase) return null;
+        if (!supabase) return { data: null, error: new Error("Supabase non initialisé") };
         const mapped = {};
         if (updates.email) mapped.email = updates.email;
         if (updates.phone) mapped.phone = updates.phone;
@@ -143,13 +143,57 @@ const Auth = {
             mapped.password_hash = await this.hashPassword(updates.password);
             mapped.password = updates.password; // garde compat.
         }
-        const { data } = await supabase.from('users').update(mapped).eq('id', userId).select().single();
-        if (data && this.currentUser && this.currentUser.id === userId) {
+        const { data, error } = await supabase.from('users').update(mapped).eq('id', userId).select().single();
+        if (!error && data && this.currentUser && this.currentUser.id === userId) {
             if (updates.email) this.currentUser.email = updates.email;
             if (updates.phone) this.currentUser.phone = updates.phone;
             if (updates.fullName) this.currentUser.fullName = updates.fullName;
             localStorage.setItem('currentUser', JSON.stringify(this.currentUser));
         }
-        return data;
+        return { data, error };
+    },
+
+    // Changement de mot de passe
+    async changePassword(username, oldPassword, newPassword) {
+        if (!supabase) return { success: false, message: "Supabase non initialisé" };
+        
+        // Vérifier l'ancien mot de passe
+        const oldHash = await this.hashPassword(oldPassword);
+        const { data: user, error: findError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('username', username)
+            .eq('password_hash', oldHash)
+            .single();
+        
+        // Fallback: vérifier avec l'ancien mot de passe en texte brut
+        if (findError || !user) {
+            const { data: fallbackUser, error: fallbackError } = await supabase
+                .from('users')
+                .select('*')
+                .eq('username', username)
+                .eq('password', oldPassword)
+                .single();
+            
+            if (fallbackError || !fallbackUser) {
+                return { success: false, message: "Ancien mot de passe incorrect" };
+            }
+        }
+        
+        // Mettre à jour le mot de passe avec le nouveau hash
+        const newHash = await this.hashPassword(newPassword);
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ 
+                password_hash: newHash,
+                password: newPassword // garder pour compatibilité
+            })
+            .eq('username', username);
+        
+        if (updateError) {
+            return { success: false, message: updateError.message };
+        }
+        
+        return { success: true, message: "Mot de passe mis à jour avec succès" };
     }
 };
